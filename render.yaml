@@ -14,7 +14,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: https://nila-botanics-storefront.vercel.app
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
