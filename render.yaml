@@ -21,7 +21,15 @@ services:
         sync: false
       - key: SNAPSERVE_API_KEY
         sync: false
-      - key: SNAPSERVE_CALL_URL
+      - key: SNAPSERVE_BASE_URL
+        value: https://app.snapserve.ai/api
+      - key: SNAPSERVE_AGENT_ID
+        sync: false
+      - key: SNAPSERVE_CAMPAIGN_WEBHOOK_URL
+        sync: false
+      - key: SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN
+        sync: false
+      - key: SNAPSERVE_WEBHOOK_SECRET
         sync: false
       - key: AUTO_CALL_ON_ORDER
         value: "false"

@@ -75,7 +75,6 @@ FRONTEND_ORIGIN=https://YOUR-VERCEL-SITE.vercel.app
 DATABASE_URL=YOUR_POSTGRES_CONNECTION_STRING
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=USE_A_STRONG_PASSWORD
-SESSION_SECRET=USE_A_LONG_RANDOM_VALUE
 ```
 
 The admin dashboard is `https://YOUR-RENDER-SERVICE.onrender.com/admin`. `FRONTEND_ORIGIN` accepts comma-separated URLs if you also use a custom domain.
@@ -86,21 +85,53 @@ The backend creates the `orders` table on startup. Use Render Postgres, Neon, Su
 
 ## SnapServe delivery-call configuration
 
-Keep the SnapServe credential only in Render. Configure a server-side SnapServe/API webhook endpoint that accepts the order payload, then set:
+Keep every SnapServe secret only in Render. Two calling modes are supported.
+
+### Recommended: campaign website intake
+
+Create an active SnapServe campaign with **Website form** as the lead source. Map `phone`, `name`, `order_id`, `order_total`, `delivery_address`, and `items` to your agent variables, then set the returned form webhook URL:
+
+```env
+SNAPSERVE_CAMPAIGN_WEBHOOK_URL=https://app.snapserve.ai/api/webhooks/lead/YOUR_TOKEN
+SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN=
+AUTO_CALL_ON_ORDER=false
+```
+
+This mode lets the delivery agent use the submitted order fields. Activate the campaign in SnapServe before enabling automatic calls.
+
+### Direct API mode
 
 ```env
 SNAPSERVE_API_KEY=YOUR_REAL_SERVER_SIDE_KEY
-SNAPSERVE_CALL_URL=https://YOUR-CONFIRMED-SNAPSERVE-ENDPOINT
+SNAPSERVE_BASE_URL=https://app.snapserve.ai/api
+SNAPSERVE_AGENT_ID=YOUR_DELIVERY_AGENT_ID
 AUTO_CALL_ON_ORDER=false
 ```
+
+Direct calls use SnapServe's documented `POST /calls/outbound` endpoint. It accepts `agentId` and `toNumber`; it does not accept per-call variables, so campaign intake is better for personalized order calls.
+
+### Call-result webhook
+
+Register this Render endpoint for `call.completed` and `call.failed`:
+
+```text
+https://YOUR-RENDER-SERVICE.onrender.com/api/webhooks/snapserve
+```
+
+Save the endpoint secret once and add it to Render:
+
+```env
+SNAPSERVE_WEBHOOK_SECRET=YOUR_ENDPOINT_SECRET
+```
+
+The backend verifies `X-SnapServe-Signature`, then stores call status, duration, cost, summary, disposition, transcript, and recording URL in Neon.
 
 Important:
 
 - Never expose `SNAPSERVE_API_KEY` in frontend code or a `NEXT_PUBLIC_*` variable.
 - Keep `AUTO_CALL_ON_ORDER=false` while testing and use **Call customer** manually.
 - After a successful test, set `AUTO_CALL_ON_ORDER=true` for automatic calls.
-- The backend sends `customer_name`, `phone_number`, `order_id`, `order_total`, `delivery_address`, and `items`.
-- A local STDIO MCP command cannot run on Render unless its code is installed inside the service; use an HTTPS bridge/webhook for that MCP server.
+- Calls are available only when the customer checks the automated-call consent box.
 
 ## API endpoints
 
@@ -111,7 +142,9 @@ Important:
 | `GET` | `/api/admin/orders` | Admin | List orders |
 | `PATCH` | `/api/admin/orders/:id` | Admin | Update fulfilment status |
 | `POST` | `/api/admin/orders/:id/call` | Admin | Initiate delivery call |
-| `GET` | `/api/admin/snapserve/tools` | Admin | Discover MCP tools |
+| `POST` | `/api/admin/orders/:id/call/refresh` | Admin | Refresh direct-call result |
+| `GET` | `/api/admin/snapserve` | Admin | Integration status |
+| `POST` | `/api/webhooks/snapserve` | Signed SnapServe | Store call result |
 | `GET` | `/api/health` | Public | Render health check |
 
 ## Production notes

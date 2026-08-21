@@ -7,6 +7,7 @@ import type { Product } from "@/lib/products";
 type Category = { name: string; copy: string; accent: string };
 type CartItem = Product & { quantity: number };
 type OrderState = { status: "idle" | "loading" | "done" | "error"; orderId?: string; message?: string };
+type TrackState = { status: "idle" | "loading" | "done" | "error"; result?: { order_number: string; status: string; call_status: string; updated_at: string }; message?: string };
 
 const faqs = [
   ["How quickly do you dispatch orders?", "Orders are normally packed within one to two business days. Delivery across India generally takes three to seven business days after dispatch."],
@@ -23,6 +24,7 @@ export default function Storefront({ products, categories }: { products: Product
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [orderState, setOrderState] = useState<OrderState>({ status: "idle" });
+  const [trackState, setTrackState] = useState<TrackState>({ status: "idle" });
   const [menuOpen, setMenuOpen] = useState(false);
   const [leadState, setLeadState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
@@ -94,6 +96,24 @@ export default function Storefront({ products, categories }: { products: Product
       setOrderState({ status: "done", orderId: result.orderId });
     } catch (error) {
       setOrderState({ status: "error", message: error instanceof Error ? error.message : "Unable to place the order" });
+    }
+  }
+
+  async function trackOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTrackState({ status: "loading" });
+    const apiUrl = process.env.NEXT_PUBLIC_ADMIN_API_URL?.replace(/\/$/, "");
+    if (!apiUrl) return setTrackState({ status: "error", message: "Order tracking is not configured yet." });
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch(`${apiUrl}/api/orders/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form.entries()))
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Order not found");
+      setTrackState({ status: "done", result });
+    } catch (error) {
+      setTrackState({ status: "error", message: error instanceof Error ? error.message : "Unable to track the order" });
     }
   }
 
@@ -198,6 +218,8 @@ export default function Storefront({ products, categories }: { products: Product
         <div className="quote-grid"><blockquote>“The routine feels simple enough to actually follow. The mist is light, and I like that the directions are clear.”<cite>— Meera, Chennai</cite></blockquote><blockquote>“Beautiful packaging and genuinely helpful support when I wasn’t sure which product to start with.”<cite>— Aarthi, Coimbatore</cite></blockquote><blockquote>“The hair oil is now part of my Sunday routine. It washes out easily and leaves my lengths soft.”<cite>— Nandhini, Bengaluru</cite></blockquote></div>
       </section>
 
+      <section className="track-order shell" id="track-order"><div><p className="eyebrow">Order support</p><h2>Track your ritual</h2><p>Use the order number from your confirmation and the same phone number used at checkout.</p></div><form onSubmit={trackOrder}><label>Order number<input name="orderId" required placeholder="NILA-..." /></label><label>Phone number<input name="phone" required inputMode="tel" /></label><button className="primary-button" disabled={trackState.status === "loading"}>{trackState.status === "loading" ? "Checking…" : "Track order"}</button>{trackState.status === "done" && trackState.result && <div className="track-result"><strong>{trackState.result.order_number}</strong><span>Order: {trackState.result.status.replaceAll("_", " ")}</span><span>Delivery call: {trackState.result.call_status.replaceAll("_", " ")}</span></div>}{trackState.status === "error" && <p className="form-error">{trackState.message}</p>}</form></section>
+
       <section className="faq shell" id="faq"><div><p className="eyebrow">Good to know</p><h2>Frequently asked questions</h2><p>Need something else? Email us and our care team will help.</p></div><div>{faqs.map(([question, answer]) => <details key={question}><summary>{question}<span>+</span></summary><p>{answer}</p></details>)}</div></section>
 
       <footer><div className="footer-main shell"><div><Link href="/" className="brand brand-light"><span className="brand-mark">N</span><span>NILA <small>BOTANICS</small></span></Link><p>Gentle botanical rituals made in India.</p></div><div><h3>Explore</h3><a href="#shop">Shop</a><a href="#collections">Collections</a><a href="#story">Our story</a></div><div><h3>Help</h3><a href="#faq">FAQs</a><a href="#contact">Routine help</a><a href="mailto:hello@nilabotanics.in">Contact</a></div><div><h3>Follow the journey</h3><p>New rituals, ingredient stories and care notes.</p><div className="socials"><a href="#" aria-label="Instagram">ig</a><a href="#" aria-label="YouTube">yt</a><a href="#" aria-label="Facebook">fb</a></div></div></div><div className="footer-bottom shell"><span>© 2026 Nila Botanics</span><span>Privacy · Terms · Shipping · Returns</span></div></footer>
@@ -227,6 +249,7 @@ export default function Storefront({ products, categories }: { products: Product
               <label>City<input name="city" required autoComplete="address-level2" /></label>
               <label>PIN code<input name="postalCode" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="postal-code" /></label>
               <label className="code-field">Any four-digit code<input name="authorizationCode" required inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="1234" /></label>
+              <label className="voice-consent"><input name="voiceCallConsent" type="checkbox" /> I agree to receive an automated delivery-confirmation call about this order.</label>
               <div className="checkout-total"><span>Subtotal</span><strong>₹{subtotal}</strong><small>{subtotal >= 799 ? "Free delivery" : "₹60 delivery will be added"}</small></div>
               <button className="primary-button" disabled={orderState.status === "loading"}>{orderState.status === "loading" ? "Placing order…" : "Place order"}</button>
               {orderState.status === "error" && <p className="form-error">{orderState.message}</p>}
