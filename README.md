@@ -84,38 +84,23 @@ The admin dashboard is `https://YOUR-RENDER-SERVICE.onrender.com/admin`. `FRONTE
 
 The backend creates the `orders` table on startup. Use Render Postgres, Neon, Supabase or another PostgreSQL provider. The database stores delivery information, items, totals, fulfilment status and call status. The four-digit demo code is validated and immediately discarded.
 
-## SnapServe MCP configuration
+## SnapServe delivery-call configuration
 
-The supplied MCP configuration describes a local STDIO process. On Render, its placeholder absolute path does not automatically exist. The `voiceorch` MCP build must be committed or installed inside the service. Then set:
+Keep the SnapServe credential only in Render. Configure a server-side SnapServe/API webhook endpoint that accepts the order payload, then set:
 
 ```env
 SNAPSERVE_API_KEY=YOUR_REAL_SERVER_SIDE_KEY
-SNAPSERVE_BASE_URL=https://app.snapserve.ai/api
-SNAPSERVE_MCP_SCRIPT=/opt/render/project/src/voiceorch/lib/snapserve-mcp/dist/index.js
-SNAPSERVE_MCP_CALL_TOOL=THE_TOOL_NAME_DISCOVERED_IN_ADMIN
-SNAPSERVE_MCP_CALL_ARGS_JSON={"agent_id":"YOUR_AGENT_ID","phone_number":"{{phone}}","variables":{"customer_name":"{{customerName}}","order_id":"{{orderId}}","order_total":"{{total}}","delivery_address":"{{address}}","items":"{{items}}"}}
+SNAPSERVE_CALL_URL=https://YOUR-CONFIRMED-SNAPSERVE-ENDPOINT
 AUTO_CALL_ON_ORDER=false
 ```
 
 Important:
 
 - Never expose `SNAPSERVE_API_KEY` in frontend code or a `NEXT_PUBLIC_*` variable.
-- Sign in to `/admin` and click **Check SnapServe** to see exact MCP tools and schemas.
-- Set `SNAPSERVE_MCP_CALL_TOOL` to the discovered outbound-call tool.
-- Adjust `SNAPSERVE_MCP_CALL_ARGS_JSON` to match its exact schema.
 - Keep `AUTO_CALL_ON_ORDER=false` while testing and use **Call customer** manually.
 - After a successful test, set `AUTO_CALL_ON_ORDER=true` for automatic calls.
-
-Supported argument-template tokens:
-
-| Token | Value |
-|---|---|
-| `{{phone}}` | E.164 customer number |
-| `{{customerName}}` | Customer name |
-| `{{orderId}}` | Order reference |
-| `{{total}}` | Final amount |
-| `{{address}}` | Full delivery address |
-| `{{items}}` | Spoken item summary |
+- The backend sends `customer_name`, `phone_number`, `order_id`, `order_total`, `delivery_address`, and `items`.
+- A local STDIO MCP command cannot run on Render unless its code is installed inside the service; use an HTTPS bridge/webhook for that MCP server.
 
 ## API endpoints
 

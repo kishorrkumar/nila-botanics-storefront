@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nila Botanics — Order Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <header><div><p>NILA BOTANICS</p><h1>Order administration</h1></div><button id="refresh">Refresh orders</button></header>
+  <main>
+    <section class="stats" id="stats"></section>
+    <section class="toolbar">
+      <input id="search" placeholder="Search order, customer or phone">
+      <select id="filter"><option value="all">All statuses</option><option>placed</option><option>confirmed</option><option>packing</option><option>shipped</option><option>delivered</option><option>cancelled</option></select>
+      <span id="message"></span>
+    </section>
+    <section id="orders" class="orders"><p class="empty">Loading orders…</p></section>
+  </main>
+  <script type="module" src="/admin/admin.js"></script>
+</body>
+</html>
