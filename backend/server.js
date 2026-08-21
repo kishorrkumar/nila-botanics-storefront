@@ -75,7 +75,7 @@ function requireAdmin(req, res) {
   return false;
 }
 
-async function parseJson(req) {
+async function readBody(req) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -83,11 +83,19 @@ async function parseJson(req) {
     if (size > 1_000_000) throw new Error("Request is too large");
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  return Buffer.concat(chunks);
+}
+
+async function parseJson(req) {
+  return JSON.parse((await readBody(req)).toString("utf8") || "{}");
 }
 
 function cleanText(value, max = 255) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function normalisePhone(value) {
+  return cleanText(value, 24).replace(/[ ()-]/g, "");
 }
 
 function makeOrderNumber() {
@@ -115,9 +123,11 @@ function validateOrder(body) {
     city: cleanText(body.city, 100),
     postalCode: cleanText(body.postalCode, 12),
     authorizationCode: cleanText(body.authorizationCode, 4),
+    voiceCallConsent: body.voiceCallConsent === true || body.voiceCallConsent === "true" || body.voiceCallConsent === "on",
     items: normaliseItems(body.items)
   };
   if (!order.customerName || !/^\+?[0-9 ()-]{8,20}$/.test(order.phone) || !order.addressLine || !order.city || !/^[0-9]{6}$/.test(order.postalCode)) return { error: "Please provide valid delivery details." };
+  order.phone = normalisePhone(order.phone);
   if (order.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(order.email)) return { error: "Please provide a valid email address." };
   if (!/^\d{4}$/.test(order.authorizationCode)) return { error: "Enter any four-digit demo authorization code." };
   if (!order.items) return { error: "The order must contain valid items." };
@@ -133,39 +143,58 @@ async function createOrder(body) {
   const totalPaise = subtotalPaise + shippingPaise;
   const orderNumber = makeOrderNumber();
   const result = await pool.query(
-    `INSERT INTO orders (order_number,customer_name,phone,email,address_line,city,postal_code,items,subtotal_paise,shipping_paise,total_paise)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11) RETURNING *`,
-    [orderNumber, order.customerName, order.phone, order.email || null, order.addressLine, order.city, order.postalCode, JSON.stringify(order.items), subtotalPaise, shippingPaise, totalPaise]
+    `INSERT INTO orders (order_number,customer_name,phone,email,address_line,city,postal_code,items,subtotal_paise,shipping_paise,total_paise,voice_call_consent)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12) RETURNING *`,
+    [orderNumber, order.customerName, order.phone, order.email || null, order.addressLine, order.city, order.postalCode, JSON.stringify(order.items), subtotalPaise, shippingPaise, totalPaise, order.voiceCallConsent]
   );
   return { row: result.rows[0] };
 }
 
 async function triggerSnapServe(order) {
-  const url = process.env.SNAPSERVE_CALL_URL;
-  if (!url) throw new Error("SNAPSERVE_CALL_URL is not configured in Render");
+  if (!order.voice_call_consent) throw new Error("The customer did not consent to an automated delivery call");
   await pool.query("UPDATE orders SET call_status='queued', call_error=NULL WHERE id=$1", [order.id]);
-  const response = await fetch(url, {
+
+  const campaignUrl = process.env.SNAPSERVE_CAMPAIGN_WEBHOOK_URL;
+  if (campaignUrl) {
+    const response = await fetch(campaignUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN ? { Authorization: `Bearer ${process.env.SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN}` } : {})
+      },
+      body: JSON.stringify({
+        phone: order.phone,
+        name: order.customer_name,
+        email: order.email,
+        order_id: order.order_number,
+        order_total: (order.total_paise / 100).toFixed(2),
+        delivery_address: `${order.address_line}, ${order.city} - ${order.postal_code}`,
+        items: order.items.map(item => `${item.name} x ${item.quantity}`).join(", ")
+      })
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`SnapServe campaign intake rejected the order (${response.status}): ${text.slice(0, 240)}`);
+    await pool.query("UPDATE orders SET call_status='queued', call_reference='campaign_intake', call_error=NULL WHERE id=$1", [order.id]);
+    return "campaign_intake";
+  }
+
+  const agentId = Number(process.env.SNAPSERVE_AGENT_ID);
+  const apiKey = process.env.SNAPSERVE_API_KEY;
+  if (!agentId || !apiKey) throw new Error("Configure SNAPSERVE_AGENT_ID and SNAPSERVE_API_KEY, or provide SNAPSERVE_CAMPAIGN_WEBHOOK_URL");
+  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://app.snapserve.ai/api").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/calls/outbound`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(process.env.SNAPSERVE_API_KEY ? { Authorization: `Bearer ${process.env.SNAPSERVE_API_KEY}` } : {})
+      Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      event: "delivery_confirmation_call",
-      customer_name: order.customer_name,
-      phone_number: order.phone,
-      order_id: order.order_number,
-      order_total: (order.total_paise / 100).toFixed(2),
-      delivery_address: `${order.address_line}, ${order.city} - ${order.postal_code}`,
-      items: order.items
-    })
+    body: JSON.stringify({ agentId, toNumber: order.phone })
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`SnapServe rejected the call (${response.status}): ${text.slice(0, 240)}`);
-  let reference = text.slice(0, 500);
-  try { reference = JSON.parse(text).call_id || JSON.parse(text).id || reference; } catch {}
-  await pool.query("UPDATE orders SET call_status='completed', call_reference=$2, call_error=NULL WHERE id=$1", [order.id, String(reference)]);
-  return reference;
+  const call = JSON.parse(text);
+  await pool.query("UPDATE orders SET call_id=$2, call_status=$3, call_reference=$4, call_error=NULL WHERE id=$1", [order.id, call.id, call.status || "pending", String(call.executionId || call.id)]);
+  return call.id;
 }
 
 async function safelyTriggerSnapServe(order) {
@@ -174,6 +203,51 @@ async function safelyTriggerSnapServe(order) {
     await pool.query("UPDATE orders SET call_status='failed', call_error=$2 WHERE id=$1", [order.id, String(error.message).slice(0, 500)]);
     throw error;
   }
+}
+
+function verifySnapServeSignature(rawBody, signature, timestamp) {
+  const secret = process.env.SNAPSERVE_WEBHOOK_SECRET;
+  if (!secret || !signature || !timestamp) return false;
+  const eventTime = Number(timestamp);
+  if (!Number.isFinite(eventTime) || Math.abs(Math.floor(Date.now() / 1000) - eventTime) > 300) return false;
+  const expected = "sha256=" + crypto.createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
+  const supplied = Buffer.from(signature); const wanted = Buffer.from(expected);
+  return supplied.length === wanted.length && crypto.timingSafeEqual(supplied, wanted);
+}
+
+async function updateOrderFromCall(data) {
+  const callId = Number(data.callId ?? data.id);
+  const phone = normalisePhone(data.toNumber);
+  const values = [
+    callId || null,
+    cleanText(data.status, 32) || "completed",
+    Number.isFinite(Number(data.durationSeconds)) ? Number(data.durationSeconds) : null,
+    Number.isFinite(Number(data.costCents)) ? Number(data.costCents) : null,
+    cleanText(data.callSummary ?? data.summary, 10000) || null,
+    cleanText(data.transcript, 100000) || null,
+    data.dispositionResult == null ? null : JSON.stringify(data.dispositionResult),
+    cleanText(data.recordingUrl, 2000) || null,
+    phone,
+    cleanText(data.errorMessage, 2000) || null
+  ];
+  const result = await pool.query(
+    `UPDATE orders SET call_id=COALESCE($1,call_id),call_status=$2,call_duration_seconds=$3,call_cost_paise=$4,
+      call_summary=$5,call_transcript=$6,call_disposition=$7::jsonb,call_recording_url=$8,call_error=$10
+     WHERE id=(SELECT id FROM orders WHERE ($1::bigint IS NOT NULL AND call_id=$1) OR ($9<>'' AND regexp_replace(phone,'[ ()-]','','g')=$9 AND voice_call_consent=true) ORDER BY created_at DESC LIMIT 1)
+     RETURNING *`, values
+  );
+  return result.rows[0] || null;
+}
+
+async function refreshSnapServeCall(order) {
+  if (!order.call_id) throw new Error("This order does not have a direct SnapServe call ID yet");
+  const apiKey = process.env.SNAPSERVE_API_KEY;
+  if (!apiKey) throw new Error("SNAPSERVE_API_KEY is not configured");
+  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://app.snapserve.ai/api").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/calls/${order.call_id}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Unable to load SnapServe call (${response.status}): ${text.slice(0, 240)}`);
+  return updateOrderFromCall(JSON.parse(text));
 }
 
 async function serveAdminAsset(req, res, pathname) {
@@ -205,22 +279,34 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, service: "nila-botanics-admin", database: "connected" }, cors);
     }
 
+    if (req.method === "POST" && pathname === "/api/webhooks/snapserve") {
+      const rawBody = (await readBody(req)).toString("utf8");
+      const signature = req.headers["x-snapserve-signature"];
+      const timestamp = req.headers["x-snapserve-timestamp"];
+      if (!verifySnapServeSignature(rawBody, signature, timestamp)) return send(res, 401, { error: "Invalid SnapServe signature" });
+      const payload = JSON.parse(rawBody || "{}");
+      if (!["call.completed", "call.failed", "call.ended"].includes(payload.event)) return send(res, 202, { accepted: true, ignored: true });
+      const order = await updateOrderFromCall(payload.data || payload);
+      return send(res, 200, { accepted: true, orderId: order?.order_number || null });
+    }
+
     if (req.method === "POST" && pathname === "/api/orders") {
       const created = await createOrder(await parseJson(req));
       if (created.error) return send(res, 400, created, cors);
-      if (process.env.AUTO_CALL_ON_ORDER === "true") safelyTriggerSnapServe(created.row).catch(error => console.error("Automatic call failed:", error.message));
+      if (process.env.AUTO_CALL_ON_ORDER === "true" && created.row.voice_call_consent) safelyTriggerSnapServe(created.row).catch(error => console.error("Automatic call failed:", error.message));
       return send(res, 201, {
         orderId: created.row.order_number,
         status: created.row.status,
         subtotal: created.row.subtotal_paise / 100,
         shipping: created.row.shipping_paise / 100,
-        total: created.row.total_paise / 100
+        total: created.row.total_paise / 100,
+        voiceCallRequested: created.row.voice_call_consent
       }, cors);
     }
 
     if (req.method === "POST" && pathname === "/api/orders/status") {
       const body = await parseJson(req);
-      const result = await pool.query("SELECT order_number,status,call_status,created_at,updated_at FROM orders WHERE order_number=$1 AND phone=$2", [cleanText(body.orderId, 32), cleanText(body.phone, 24)]);
+      const result = await pool.query("SELECT order_number,status,call_status,created_at,updated_at FROM orders WHERE order_number=$1 AND regexp_replace(phone,'[ ()-]','','g')=$2", [cleanText(body.orderId, 32), normalisePhone(body.phone)]);
       return result.rowCount ? send(res, 200, result.rows[0], cors) : send(res, 404, { error: "Order not found" }, cors);
     }
 
@@ -229,6 +315,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && pathname === "/api/admin/orders") {
       const result = await pool.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500");
       return send(res, 200, { orders: result.rows });
+    }
+
+    if (req.method === "GET" && pathname === "/api/admin/snapserve") {
+      const publicProtocol = String(req.headers["x-forwarded-proto"] || "http").split(",")[0];
+      return send(res, 200, {
+        mode: process.env.SNAPSERVE_CAMPAIGN_WEBHOOK_URL ? "campaign_webhook" : (process.env.SNAPSERVE_AGENT_ID && process.env.SNAPSERVE_API_KEY ? "direct_api" : "not_configured"),
+        automaticCalls: process.env.AUTO_CALL_ON_ORDER === "true",
+        resultWebhook: Boolean(process.env.SNAPSERVE_WEBHOOK_SECRET),
+        resultWebhookUrl: `${publicProtocol}://${req.headers.host}/api/webhooks/snapserve`
+      });
     }
 
     const statusMatch = pathname.match(/^\/api\/admin\/orders\/(\d+)$/);
@@ -246,6 +342,18 @@ const server = http.createServer(async (req, res) => {
       try {
         const reference = await safelyTriggerSnapServe(result.rows[0]);
         return send(res, 200, { accepted: true, reference });
+      } catch (error) {
+        return send(res, 502, { error: error.message });
+      }
+    }
+
+    const refreshMatch = pathname.match(/^\/api\/admin\/orders\/(\d+)\/call\/refresh$/);
+    if (req.method === "POST" && refreshMatch) {
+      const result = await pool.query("SELECT * FROM orders WHERE id=$1", [refreshMatch[1]]);
+      if (!result.rowCount) return send(res, 404, { error: "Order not found" });
+      try {
+        const order = await refreshSnapServeCall(result.rows[0]);
+        return send(res, 200, { order });
       } catch (error) {
         return send(res, 502, { error: error.message });
       }

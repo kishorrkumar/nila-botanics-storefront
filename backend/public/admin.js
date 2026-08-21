@@ -1,6 +1,7 @@
 const ordersEl = document.querySelector("#orders");
 const statsEl = document.querySelector("#stats");
 const messageEl = document.querySelector("#message");
+const integrationEl = document.querySelector("#integration");
 const searchEl = document.querySelector("#search");
 const filterEl = document.querySelector("#filter");
 let orders = [];
@@ -25,16 +26,24 @@ function renderOrders() {
     <article class="order" data-id="${order.id}">
       <div><h2>${escapeHtml(order.order_number)}</h2><p><strong>${escapeHtml(order.customer_name)}</strong><br>${escapeHtml(order.phone)}${order.email ? `<br>${escapeHtml(order.email)}` : ""}</p><p>${escapeHtml(order.address_line)}, ${escapeHtml(order.city)} — ${escapeHtml(order.postal_code)}</p></div>
       <div><p><strong>Items</strong></p>${order.items.map(item => `<p>${escapeHtml(item.name)} × ${item.quantity}</p>`).join("")}<p><strong>${money(order.total_paise)}</strong></p></div>
-      <div><p><strong>Placed</strong><br>${date(order.created_at)}</p><label>Status<br><select class="status">${["placed","confirmed","packing","shipped","delivered","cancelled"].map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select></label><p class="call-state">Call: ${escapeHtml(order.call_status)}</p></div>
-      <div class="actions"><button class="save">Save status</button><button class="secondary call">Call customer</button></div>
+      <div><p><strong>Placed</strong><br>${date(order.created_at)}</p><label>Status<br><select class="status">${["placed","confirmed","packing","shipped","delivered","cancelled"].map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select></label><p class="call-state">Call: ${escapeHtml(order.call_status)}${order.call_id ? ` · #${order.call_id}` : ""}</p><p>Voice consent: <strong>${order.voice_call_consent ? "Yes" : "No"}</strong></p></div>
+      <div class="actions"><button class="save">Save status</button><button class="secondary call" ${order.voice_call_consent ? "" : "disabled"}>${["failed","no_pickup","busy"].includes(order.call_status) ? "Retry call" : "Call customer"}</button><button class="refresh" ${order.call_id ? "" : "disabled"}>Refresh call</button></div>
+      ${(order.call_summary || order.call_transcript || order.call_recording_url || order.call_disposition || order.call_error) ? `<details class="call-details"><summary>Call result</summary>${order.call_error ? `<p class="error"><strong>Error</strong><br>${escapeHtml(order.call_error)}</p>` : ""}${order.call_summary ? `<p><strong>Summary</strong><br>${escapeHtml(order.call_summary)}</p>` : ""}${order.call_disposition ? `<p><strong>Disposition</strong><br>${escapeHtml(JSON.stringify(order.call_disposition))}</p>` : ""}${order.call_duration_seconds != null ? `<p>${order.call_duration_seconds}s · ${order.call_cost_paise == null ? "Cost pending" : money(order.call_cost_paise)}</p>` : ""}${order.call_recording_url ? `<p><a href="${escapeHtml(order.call_recording_url)}" target="_blank" rel="noreferrer">Open recording</a></p>` : ""}${order.call_transcript ? `<pre>${escapeHtml(order.call_transcript)}</pre>` : ""}</details>` : ""}
     </article>`).join("");
 }
 
 async function loadOrders() {
   messageEl.textContent = "Loading…";
-  const response = await fetch("/api/admin/orders", { cache: "no-store" });
+  const [response, integrationResponse] = await Promise.all([fetch("/api/admin/orders", { cache: "no-store" }), fetch("/api/admin/snapserve", { cache: "no-store" })]);
   if (!response.ok) throw new Error("Unable to load orders");
   orders = (await response.json()).orders;
+  if (integrationResponse.ok) {
+    const integration = await integrationResponse.json();
+    integrationEl.className = `integration ${integration.mode === "not_configured" ? "warning" : "ready"}`;
+    integrationEl.textContent = integration.mode === "not_configured"
+      ? "SnapServe is not configured. Add the Render environment variables before placing calls."
+      : `SnapServe: ${integration.mode.replace("_", " ")} · Automatic calls ${integration.automaticCalls ? "on" : "off"} · Result webhook ${integration.resultWebhook ? "ready" : "not configured"}`;
+  }
   renderStats(); renderOrders(); messageEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 }
 
@@ -45,14 +54,16 @@ ordersEl.addEventListener("click", async event => {
   event.target.disabled = true; messageEl.textContent = "Working…";
   try {
     const isCall = event.target.classList.contains("call");
-    const response = await fetch(isCall ? `/api/admin/orders/${id}/call` : `/api/admin/orders/${id}`, {
-      method: isCall ? "POST" : "PATCH",
+    const isRefresh = event.target.classList.contains("refresh");
+    const endpoint = isCall ? `/api/admin/orders/${id}/call` : isRefresh ? `/api/admin/orders/${id}/call/refresh` : `/api/admin/orders/${id}`;
+    const response = await fetch(endpoint, {
+      method: (isCall || isRefresh) ? "POST" : "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: isCall ? undefined : JSON.stringify({ status: card.querySelector(".status").value })
+      body: (isCall || isRefresh) ? undefined : JSON.stringify({ status: card.querySelector(".status").value })
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Action failed");
-    messageEl.textContent = isCall ? "Delivery call started." : "Order status updated.";
+    messageEl.textContent = isCall ? "Delivery call started." : isRefresh ? "Call details refreshed." : "Order status updated.";
     await loadOrders();
   } catch (error) { messageEl.textContent = error.message; messageEl.className = "error"; }
   finally { event.target.disabled = false; }
