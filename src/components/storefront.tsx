@@ -6,6 +6,7 @@ import type { Product } from "@/lib/products";
 
 type Category = { name: string; copy: string; accent: string };
 type CartItem = Product & { quantity: number };
+type PlacedOrder = { id: string; total: number; status: string; paymentStatus: string; callStatus: string };
 
 const faqs = [
   ["How quickly do you dispatch orders?", "Orders are normally packed within one to two business days. Delivery across India generally takes three to seven business days after dispatch."],
@@ -20,6 +21,10 @@ export default function Storefront({ products, categories }: { products: Product
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutState, setCheckoutState] = useState<"idle" | "loading" | "error" | "done">("idle");
+  const [checkoutError, setCheckoutError] = useState("");
+  const [placedOrder, setPlacedOrder] = useState<PlacedOrder | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [leadState, setLeadState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
@@ -64,6 +69,41 @@ export default function Storefront({ products, categories }: { products: Product
       event.currentTarget.reset();
     } catch {
       setLeadState("error");
+    }
+  }
+
+  async function submitCheckout(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCheckoutState("loading");
+    setCheckoutError("");
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries());
+    const apiUrl = process.env.NEXT_PUBLIC_ADMIN_API_URL || "http://localhost:4000";
+    try {
+      const response = await fetch(`${apiUrl}/api/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          items: cart.map(item => ({ id: item.id, quantity: item.quantity }))
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to place the order");
+      setPlacedOrder(result.order);
+      setCheckoutState("done");
+      setCart([]);
+    } catch (error) {
+      setCheckoutError(error instanceof Error ? error.message : "Unable to place the order");
+      setCheckoutState("error");
+    }
+  }
+
+  function closeCheckout() {
+    setCheckoutOpen(false);
+    if (checkoutState === "done") {
+      setCheckoutState("idle");
+      setPlacedOrder(null);
     }
   }
 
@@ -175,9 +215,36 @@ export default function Storefront({ products, categories }: { products: Product
       <aside className={cartOpen ? "cart-drawer open" : "cart-drawer"} aria-hidden={!cartOpen}>
         <div className="cart-title"><h2>Your bag</h2><button onClick={() => setCartOpen(false)}>×</button></div>
         <div className="cart-items">{cart.length === 0 ? <div className="empty-cart"><span>♧</span><p>Your bag is waiting for a ritual.</p><button onClick={() => setCartOpen(false)}>Continue shopping</button></div> : cart.map(item => <div className="cart-item" key={item.id}><img src={item.image} alt="" /><div><h3>{item.name}</h3><p>₹{item.price}</p><div className="quantity"><button onClick={() => updateQuantity(item.id, -1)}>−</button><span>{item.quantity}</span><button onClick={() => updateQuantity(item.id, 1)}>+</button></div></div></div>)}</div>
-        {cart.length > 0 && <div className="cart-footer"><div><span>Subtotal</span><strong>₹{subtotal}</strong></div><p>Shipping and taxes calculated at checkout.</p><button className="primary-button">Proceed to checkout</button></div>}
+        {cart.length > 0 && <div className="cart-footer"><div><span>Subtotal</span><strong>₹{subtotal}</strong></div><p>{subtotal >= 799 ? "Free delivery included." : "₹69 delivery will be added at checkout."}</p><button className="primary-button" onClick={() => { setCartOpen(false); setCheckoutOpen(true); }}>Proceed to checkout</button></div>}
       </aside>
-      {cartOpen && <button className="overlay" onClick={() => setCartOpen(false)} aria-label="Close bag" />}
+      {checkoutOpen && <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <button className="checkout-close" onClick={closeCheckout} aria-label="Close checkout">×</button>
+        {checkoutState === "done" && placedOrder ? <div className="order-success">
+          <span className="success-mark">✓</span>
+          <p className="eyebrow">Order received</p>
+          <h2>Thank you—your order is placed.</h2>
+          <p>Your order reference is <strong>{placedOrder.id}</strong>.</p>
+          <div className="success-summary"><span>Demo authorization</span><strong>Approved</strong><span>Order total</span><strong>₹{placedOrder.total}</strong><span>Delivery call</span><strong>{placedOrder.callStatus === "queued" ? "Queued" : "Managed by our team"}</strong></div>
+          <p className="demo-note">No real payment was collected. The four-digit demo code was verified but never stored.</p>
+          <button className="primary-button" onClick={closeCheckout}>Continue shopping →</button>
+        </div> : <>
+          <div className="checkout-heading"><p className="eyebrow">Secure demo checkout</p><h2 id="checkout-title">Delivery details</h2><p>Place a test order using any four-digit authorization code. No real card or cash payment is processed.</p></div>
+          <div className="checkout-layout">
+            <form className="checkout-form" onSubmit={submitCheckout}>
+              <div className="field-grid"><label>Full name<input name="customerName" required autoComplete="name" placeholder="Your full name" /></label><label>Mobile number<input name="phone" required inputMode="tel" autoComplete="tel" placeholder="10-digit mobile number" /></label></div>
+              <label>Email <span>(optional)</span><input name="email" type="email" autoComplete="email" placeholder="you@example.com" /></label>
+              <label>Delivery address<textarea name="address" required autoComplete="street-address" placeholder="House number, street and area" /></label>
+              <div className="field-grid"><label>City<input name="city" required autoComplete="address-level2" placeholder="Chennai" /></label><label>Pincode<input name="pincode" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="postal-code" placeholder="600001" /></label></div>
+              <div className="demo-payment"><div><span>DEMO</span><div><strong>Four-digit authorization</strong><p>Enter any four digits. This is not a real payment.</p></div></div><input name="demoPasscode" required type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="••••" aria-label="Four-digit demo authorization code" /></div>
+              <label className="call-consent"><input type="checkbox" name="callConsent" value="yes" required /><span>I agree to receive an automated SnapServe call about this order and its delivery.</span></label>
+              {checkoutState === "error" && <p className="checkout-error">{checkoutError}</p>}
+              <button className="primary-button place-order" disabled={checkoutState === "loading"}>{checkoutState === "loading" ? "Placing order…" : `Place demo order · ₹${subtotal >= 799 ? subtotal : subtotal + 69}`}</button>
+            </form>
+            <aside className="checkout-summary"><h3>Order summary</h3>{cart.map(item => <div className="checkout-item" key={item.id}><img src={item.image} alt="" /><div><strong>{item.name}</strong><span>Qty {item.quantity}</span></div><b>₹{item.price * item.quantity}</b></div>)}<div className="checkout-total"><span>Subtotal</span><b>₹{subtotal}</b><span>Delivery</span><b>{subtotal >= 799 ? "Free" : "₹69"}</b><strong>Total</strong><strong>₹{subtotal >= 799 ? subtotal : subtotal + 69}</strong></div></aside>
+          </div>
+        </>}
+      </section>}
+      {(cartOpen || checkoutOpen) && <button className="overlay" onClick={() => { setCartOpen(false); if (checkoutState !== "loading") closeCheckout(); }} aria-label="Close dialog" />}
     </main>
   );
 }

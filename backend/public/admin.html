@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nila Orders</title><link rel="stylesheet" href="/admin-assets/admin.css"></head>
+<body>
+  <section class="login" id="loginView"><form id="loginForm"><div class="logo">N</div><p class="eyebrow">Nila Botanics</p><h1>Order desk</h1><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button>Sign in</button><p class="error" id="loginError"></p></form></section>
+  <main class="app hidden" id="appView">
+    <header><div><p class="eyebrow">Nila Botanics</p><h1>Orders & delivery calls</h1></div><div class="header-actions"><button class="secondary" id="toolsButton">Check SnapServe</button><button class="secondary" id="refreshButton">Refresh</button><button class="secondary" id="logoutButton">Sign out</button></div></header>
+    <section class="metrics"><article><span>Total orders</span><strong id="totalOrders">0</strong></article><article><span>New</span><strong id="placedOrders">0</strong></article><article><span>Calls initiated</span><strong id="calledOrders">0</strong></article><article><span>Revenue</span><strong id="revenue">₹0</strong></article></section>
+    <div class="toolbar"><input id="searchInput" placeholder="Search order, customer or phone"><select id="statusFilter"><option value="">All statuses</option><option>placed</option><option>confirmed</option><option>packed</option><option>shipped</option><option>delivered</option><option>cancelled</option></select><span id="updatedAt"></span></div>
+    <section class="orders" id="orders"></section>
+    <p class="empty hidden" id="emptyState">No orders match this view.</p>
+  </main>
+  <dialog id="toolsDialog"><button class="dialog-close" id="closeTools">×</button><p class="eyebrow">SnapServe MCP</p><h2>Connection and tools</h2><pre id="toolsOutput">Checking…</pre></dialog>
+  <script src="/admin-assets/admin.js" defer></script>
+</body></html>
