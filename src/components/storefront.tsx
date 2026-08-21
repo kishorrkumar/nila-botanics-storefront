@@ -6,6 +6,7 @@ import type { Product } from "@/lib/products";
 
 type Category = { name: string; copy: string; accent: string };
 type CartItem = Product & { quantity: number };
+type OrderState = { status: "idle" | "loading" | "done" | "error"; orderId?: string; message?: string };
 
 const faqs = [
   ["How quickly do you dispatch orders?", "Orders are normally packed within one to two business days. Delivery across India generally takes three to seven business days after dispatch."],
@@ -20,6 +21,8 @@ export default function Storefront({ products, categories }: { products: Product
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [orderState, setOrderState] = useState<OrderState>({ status: "idle" });
   const [menuOpen, setMenuOpen] = useState(false);
   const [leadState, setLeadState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
@@ -64,6 +67,33 @@ export default function Storefront({ products, categories }: { products: Product
       event.currentTarget.reset();
     } catch {
       setLeadState("error");
+    }
+  }
+
+  async function submitOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setOrderState({ status: "loading" });
+    const form = new FormData(event.currentTarget);
+    const apiUrl = process.env.NEXT_PUBLIC_ADMIN_API_URL?.replace(/\/$/, "");
+    if (!apiUrl) {
+      setOrderState({ status: "error", message: "Ordering is not configured yet. Please contact us." });
+      return;
+    }
+    try {
+      const response = await fetch(`${apiUrl}/api/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...Object.fromEntries(form.entries()),
+          items: cart.map(item => ({ id: item.id, name: item.name, price: item.price, quantity: item.quantity }))
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to place the order");
+      setCart([]);
+      setOrderState({ status: "done", orderId: result.orderId });
+    } catch (error) {
+      setOrderState({ status: "error", message: error instanceof Error ? error.message : "Unable to place the order" });
     }
   }
 
@@ -175,9 +205,36 @@ export default function Storefront({ products, categories }: { products: Product
       <aside className={cartOpen ? "cart-drawer open" : "cart-drawer"} aria-hidden={!cartOpen}>
         <div className="cart-title"><h2>Your bag</h2><button onClick={() => setCartOpen(false)}>×</button></div>
         <div className="cart-items">{cart.length === 0 ? <div className="empty-cart"><span>♧</span><p>Your bag is waiting for a ritual.</p><button onClick={() => setCartOpen(false)}>Continue shopping</button></div> : cart.map(item => <div className="cart-item" key={item.id}><img src={item.image} alt="" /><div><h3>{item.name}</h3><p>₹{item.price}</p><div className="quantity"><button onClick={() => updateQuantity(item.id, -1)}>−</button><span>{item.quantity}</span><button onClick={() => updateQuantity(item.id, 1)}>+</button></div></div></div>)}</div>
-        {cart.length > 0 && <div className="cart-footer"><div><span>Subtotal</span><strong>₹{subtotal}</strong></div><p>Shipping and taxes calculated at checkout.</p><button className="primary-button">Proceed to checkout</button></div>}
+        {cart.length > 0 && <div className="cart-footer"><div><span>Subtotal</span><strong>₹{subtotal}</strong></div><p>Shipping is calculated at checkout. No online payment is collected.</p><button className="primary-button" onClick={() => { setCartOpen(false); setCheckoutOpen(true); setOrderState({ status: "idle" }); }}>Proceed to checkout</button></div>}
       </aside>
       {cartOpen && <button className="overlay" onClick={() => setCartOpen(false)} aria-label="Close bag" />}
+
+      {checkoutOpen && <div className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <div className="checkout-card">
+          <button className="checkout-close" onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button>
+          {orderState.status === "done" ? <div className="order-success">
+            <span>✓</span><p className="eyebrow">Order placed</p><h2 id="checkout-title">Thank you for your order.</h2>
+            <p>Your order number is <strong>{orderState.orderId}</strong>. Our team will contact you to confirm delivery. No online payment was taken.</p>
+            <button className="primary-button" onClick={() => setCheckoutOpen(false)}>Continue shopping</button>
+          </div> : <>
+            <p className="eyebrow">Simple order confirmation</p><h2 id="checkout-title">Delivery details</h2>
+            <p className="checkout-note">Enter any four-digit code to place this demo order. This is not a payment and the code is not stored.</p>
+            <form className="checkout-form" onSubmit={submitOrder}>
+              <label>Full name<input name="customerName" required autoComplete="name" /></label>
+              <label>Phone number<input name="phone" required inputMode="tel" autoComplete="tel" placeholder="+91 98765 43210" /></label>
+              <label>Email (optional)<input name="email" type="email" autoComplete="email" /></label>
+              <label>Address<textarea name="addressLine" required autoComplete="street-address" rows={3} /></label>
+              <label>City<input name="city" required autoComplete="address-level2" /></label>
+              <label>PIN code<input name="postalCode" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="postal-code" /></label>
+              <label className="code-field">Any four-digit code<input name="authorizationCode" required inputMode="numeric" pattern="[0-9]{4}" maxLength={4} placeholder="1234" /></label>
+              <div className="checkout-total"><span>Subtotal</span><strong>₹{subtotal}</strong><small>{subtotal >= 799 ? "Free delivery" : "₹60 delivery will be added"}</small></div>
+              <button className="primary-button" disabled={orderState.status === "loading"}>{orderState.status === "loading" ? "Placing order…" : "Place order"}</button>
+              {orderState.status === "error" && <p className="form-error">{orderState.message}</p>}
+            </form>
+          </>}
+        </div>
+        <button className="overlay" onClick={() => setCheckoutOpen(false)} aria-label="Close checkout" />
+      </div>}
     </main>
   );
 }

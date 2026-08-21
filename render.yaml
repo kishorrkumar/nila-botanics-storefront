@@ -19,17 +19,9 @@ services:
         value: admin
       - key: ADMIN_PASSWORD
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true
       - key: SNAPSERVE_API_KEY
         sync: false
-      - key: SNAPSERVE_BASE_URL
-        value: https://app.snapserve.ai/api
-      - key: SNAPSERVE_MCP_SCRIPT
-        sync: false
-      - key: SNAPSERVE_MCP_CALL_TOOL
-        sync: false
-      - key: SNAPSERVE_MCP_CALL_ARGS_JSON
+      - key: SNAPSERVE_CALL_URL
         sync: false
       - key: AUTO_CALL_ON_ORDER
         value: "false"
