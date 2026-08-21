@@ -39,8 +39,8 @@ function renderOrders() {
       <div><h2>${escapeHtml(order.order_number)}</h2><p><strong>${escapeHtml(order.customer_name)}</strong><br>${escapeHtml(order.phone)}${order.email ? `<br>${escapeHtml(order.email)}` : ""}</p><p>${escapeHtml(order.address_line)}, ${escapeHtml(order.city)} — ${escapeHtml(order.postal_code)}</p></div>
       <div><p><strong>Items</strong></p>${order.items.map(item => `<p>${escapeHtml(item.name)} × ${item.quantity}</p>`).join("")}<p><strong>${money(order.total_paise)}</strong></p></div>
       <div><p><strong>Placed</strong><br>${date(order.created_at)}</p><label>Status<br><select class="status">${["placed","confirmed","packing","shipped","delivered","cancelled"].map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select></label><p class="call-state">Call: ${escapeHtml(order.call_status)}${order.call_id ? ` · #${order.call_id}` : ""}</p><p>Voice consent: <strong>${order.voice_call_consent ? "Yes" : "No"}</strong></p></div>
-      <div class="actions"><button class="save">Save status</button><label class="agent-label">Call with<select class="agent" ${order.voice_call_consent ? "" : "disabled"}>${agentOptions(order)}</select></label><button class="secondary call" ${order.voice_call_consent ? "" : "disabled"}>${["failed","no_pickup","busy"].includes(order.call_status) ? "Retry call" : "Call customer"}</button><button class="muted refresh" ${order.call_id ? "" : "disabled"}>Refresh call</button></div>
-      ${!order.voice_call_consent ? '<p class="consent-note">Calling is disabled because this customer did not give voice-call consent.</p>' : ""}
+      <div class="actions"><button class="save">Save status</button><label class="agent-label">Call with<select class="agent">${agentOptions(order)}</select></label>${!order.voice_call_consent ? '<label class="consent-confirm"><input type="checkbox"> I confirm the customer agreed to this call</label>' : ""}<button class="secondary call" ${order.voice_call_consent ? "" : "disabled"}>${["failed","no_pickup","busy"].includes(order.call_status) ? "Retry call" : "Call customer"}</button><button class="muted refresh" ${order.call_id ? "" : "disabled"}>Refresh call</button></div>
+      ${!order.voice_call_consent ? '<p class="consent-note">For this older order, confirm the customer’s permission above to enable calling.</p>' : ""}
       ${(order.call_summary || order.call_transcript || order.call_recording_url || order.call_disposition || order.call_error || order.call_agent_name) ? `<details class="call-details"><summary>Call result</summary>${order.call_agent_name ? `<p><strong>Agent</strong><br>${escapeHtml(order.call_agent_name)}</p>` : ""}${order.call_error ? `<p class="error"><strong>Error</strong><br>${escapeHtml(order.call_error)}</p>` : ""}${order.call_summary ? `<p><strong>Summary</strong><br>${escapeHtml(order.call_summary)}</p>` : ""}${order.call_disposition ? `<p><strong>Disposition</strong><br>${escapeHtml(JSON.stringify(order.call_disposition))}</p>` : ""}${order.call_duration_seconds != null ? `<p>${order.call_duration_seconds}s · ${order.call_cost_paise == null ? "Cost pending" : money(order.call_cost_paise)}</p>` : ""}${order.call_recording_url ? `<p><a href="${escapeHtml(order.call_recording_url)}" target="_blank" rel="noreferrer">Open recording</a></p>` : ""}${order.call_transcript ? `<pre>${escapeHtml(order.call_transcript)}</pre>` : ""}</details>` : ""}
     </article>`).join("");
 }
@@ -106,7 +106,7 @@ ordersEl.addEventListener("click", async event => {
     const endpoint = isCall ? `/api/admin/orders/${id}/call` : isRefresh ? `/api/admin/orders/${id}/call/refresh` : `/api/admin/orders/${id}`;
     const selected = card.querySelector(".agent");
     const selectedOption = selected?.selectedOptions[0];
-    const body = isCall ? JSON.stringify({ agentId: selected.value || null, agentName: selected.value ? selectedOption.textContent.split(" · ")[0] : null }) : isRefresh ? undefined : JSON.stringify({ status: card.querySelector(".status").value });
+    const body = isCall ? JSON.stringify({ agentId: selected.value || null, agentName: selected.value ? selectedOption.textContent.split(" · ")[0] : null, confirmConsent: card.querySelector(".consent-confirm input")?.checked === true }) : isRefresh ? undefined : JSON.stringify({ status: card.querySelector(".status").value });
     const response = await fetch(endpoint, { method: (isCall || isRefresh) ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Action failed");
@@ -114,6 +114,11 @@ ordersEl.addEventListener("click", async event => {
     await loadData();
   } catch (error) { messageEl.textContent = error.message; messageEl.className = "error"; }
   finally { event.target.disabled = false; }
+});
+
+ordersEl.addEventListener("change", event => {
+  if (!event.target.matches(".consent-confirm input")) return;
+  event.target.closest(".order").querySelector(".call").disabled = !event.target.checked;
 });
 
 document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => {
