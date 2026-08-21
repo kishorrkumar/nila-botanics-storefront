@@ -150,12 +150,38 @@ async function createOrder(body) {
   return { row: result.rows[0] };
 }
 
-async function triggerSnapServe(order) {
+function snapServeConfig() {
+  return {
+    apiKey: process.env.SNAPSERVE_API_KEY,
+    baseUrl: (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "")
+  };
+}
+
+function normaliseSnapServeAgents(payload) {
+  const rows = Array.isArray(payload) ? payload : payload?.agents ?? payload?.items ?? payload?.results ?? payload?.data?.agents ?? payload?.data?.items ?? payload?.data ?? [];
+  if (!Array.isArray(rows)) return [];
+  return rows.map(agent => ({
+    id: Number(agent.id ?? agent.agentId),
+    name: cleanText(agent.name ?? agent.agentName ?? agent.title ?? `Agent ${agent.id}`, 160),
+    status: cleanText(agent.status ?? agent.state, 40) || "available"
+  })).filter(agent => Number.isSafeInteger(agent.id) && agent.id > 0);
+}
+
+async function fetchSnapServeAgents() {
+  const { apiKey, baseUrl } = snapServeConfig();
+  if (!apiKey) throw new Error("SNAPSERVE_API_KEY is not configured");
+  const response = await fetch(`${baseUrl}/agents`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Unable to load SnapServe agents (${response.status}): ${text.slice(0, 240)}`);
+  return normaliseSnapServeAgents(JSON.parse(text));
+}
+
+async function triggerSnapServe(order, options = {}) {
   if (!order.voice_call_consent) throw new Error("The customer did not consent to an automated delivery call");
   await pool.query("UPDATE orders SET call_status='queued', call_error=NULL WHERE id=$1", [order.id]);
 
   const campaignUrl = process.env.SNAPSERVE_CAMPAIGN_WEBHOOK_URL;
-  if (campaignUrl) {
+  if (campaignUrl && !options.agentId) {
     const response = await fetch(campaignUrl, {
       method: "POST",
       headers: {
@@ -178,10 +204,15 @@ async function triggerSnapServe(order) {
     return "campaign_intake";
   }
 
-  const agentId = Number(process.env.SNAPSERVE_AGENT_ID);
-  const apiKey = process.env.SNAPSERVE_API_KEY;
+  const agentId = Number(options.agentId || process.env.SNAPSERVE_AGENT_ID);
+  let agentName = cleanText(options.agentName, 160) || null;
+  const { apiKey, baseUrl } = snapServeConfig();
   if (!agentId || !apiKey) throw new Error("Configure SNAPSERVE_AGENT_ID and SNAPSERVE_API_KEY, or provide SNAPSERVE_CAMPAIGN_WEBHOOK_URL");
-  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "");
+  if (options.agentId) {
+    const selectedAgent = (await fetchSnapServeAgents()).find(agent => agent.id === agentId);
+    if (!selectedAgent) throw new Error("The selected SnapServe agent is no longer available");
+    agentName = selectedAgent.name;
+  }
   const response = await fetch(`${baseUrl}/calls/outbound`, {
     method: "POST",
     headers: {
@@ -193,12 +224,12 @@ async function triggerSnapServe(order) {
   const text = await response.text();
   if (!response.ok) throw new Error(`SnapServe rejected the call (${response.status}): ${text.slice(0, 240)}`);
   const call = JSON.parse(text);
-  await pool.query("UPDATE orders SET call_id=$2, call_status=$3, call_reference=$4, call_error=NULL WHERE id=$1", [order.id, call.id, call.status || "pending", String(call.executionId || call.id)]);
+  await pool.query("UPDATE orders SET call_id=$2, call_status=$3, call_reference=$4, call_agent_id=$5, call_agent_name=$6, call_error=NULL WHERE id=$1", [order.id, call.id, call.status || "pending", String(call.executionId || call.id), agentId, agentName]);
   return call.id;
 }
 
-async function safelyTriggerSnapServe(order) {
-  try { await triggerSnapServe(order); }
+async function safelyTriggerSnapServe(order, options = {}) {
+  try { await triggerSnapServe(order, options); }
   catch (error) {
     await pool.query("UPDATE orders SET call_status='failed', call_error=$2 WHERE id=$1", [order.id, String(error.message).slice(0, 500)]);
     throw error;
@@ -248,6 +279,56 @@ async function refreshSnapServeCall(order) {
   const text = await response.text();
   if (!response.ok) throw new Error(`Unable to load SnapServe call (${response.status}): ${text.slice(0, 240)}`);
   return updateOrderFromCall(JSON.parse(text));
+}
+
+async function getOrderAnalytics(days) {
+  const [summaryResult, statusResult, dailyResult, productResult, callResult, agentResult] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS total_orders,
+        COUNT(*) FILTER (WHERE status <> 'cancelled')::int AS active_orders,
+        COALESCE(SUM(total_paise) FILTER (WHERE status <> 'cancelled'),0)::bigint AS revenue_paise,
+        COALESCE(AVG(total_paise) FILTER (WHERE status <> 'cancelled'),0)::bigint AS average_order_paise,
+        COUNT(DISTINCT phone)::int AS customers
+       FROM orders WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day')`, [days]),
+    pool.query(
+      `SELECT status, COUNT(*)::int AS count FROM orders
+       WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day') GROUP BY status ORDER BY status`, [days]),
+    pool.query(
+      `SELECT created_at::date AS day, COUNT(*)::int AS orders,
+        COALESCE(SUM(total_paise) FILTER (WHERE status <> 'cancelled'),0)::bigint AS revenue_paise
+       FROM orders WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day')
+       GROUP BY created_at::date ORDER BY day`, [days]),
+    pool.query(
+      `SELECT item->>'name' AS name,
+        SUM((item->>'quantity')::int)::int AS quantity,
+        SUM((item->>'price')::numeric * (item->>'quantity')::int * 100)::bigint AS revenue_paise
+       FROM orders CROSS JOIN LATERAL jsonb_array_elements(items) item
+       WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day') AND status <> 'cancelled'
+       GROUP BY item->>'name' ORDER BY quantity DESC, revenue_paise DESC LIMIT 8`, [days]),
+    pool.query(
+      `SELECT COUNT(*) FILTER (WHERE call_status <> 'not_called')::int AS attempted,
+        COUNT(*) FILTER (WHERE call_status IN ('completed','connected','booked'))::int AS completed,
+        COUNT(*) FILTER (WHERE call_status IN ('failed','cancelled','no_pickup','voicemail','busy'))::int AS unsuccessful,
+        COALESCE(SUM(call_duration_seconds),0)::bigint AS duration_seconds,
+        COALESCE(SUM(call_cost_paise),0)::bigint AS cost_paise
+       FROM orders WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day')`, [days]),
+    pool.query(
+      `SELECT COALESCE(call_agent_name, CASE WHEN call_agent_id IS NULL THEN 'Campaign/default agent' ELSE 'Agent #' || call_agent_id END) AS name,
+        COUNT(*)::int AS calls,
+        COUNT(*) FILTER (WHERE call_status IN ('completed','connected','booked'))::int AS completed
+       FROM orders WHERE created_at >= NOW() - ($1::int * INTERVAL '1 day') AND call_status <> 'not_called'
+       GROUP BY call_agent_name,call_agent_id ORDER BY calls DESC`, [days])
+  ]);
+  const numberise = row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, /^-?\d+(\.\d+)?$/.test(String(value)) ? Number(value) : value]));
+  return {
+    days,
+    summary: numberise(summaryResult.rows[0]),
+    statuses: statusResult.rows.map(numberise),
+    daily: dailyResult.rows.map(numberise),
+    products: productResult.rows.map(numberise),
+    calls: numberise(callResult.rows[0]),
+    agents: agentResult.rows.map(numberise)
+  };
 }
 
 async function serveAdminAsset(req, res, pathname) {
@@ -317,6 +398,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { orders: result.rows });
     }
 
+    if (req.method === "GET" && pathname === "/api/admin/analytics") {
+      const requestedDays = Number(url.searchParams.get("days") || 30);
+      const days = [7, 30, 90, 365].includes(requestedDays) ? requestedDays : 30;
+      return send(res, 200, await getOrderAnalytics(days));
+    }
+
     if (req.method === "GET" && pathname === "/api/admin/snapserve") {
       const publicProtocol = String(req.headers["x-forwarded-proto"] || "http").split(",")[0];
       return send(res, 200, {
@@ -325,6 +412,14 @@ const server = http.createServer(async (req, res) => {
         resultWebhook: Boolean(process.env.SNAPSERVE_WEBHOOK_SECRET),
         resultWebhookUrl: `${publicProtocol}://${req.headers.host}/api/webhooks/snapserve`
       });
+    }
+
+    if (req.method === "GET" && pathname === "/api/admin/snapserve/agents") {
+      try {
+        return send(res, 200, { agents: await fetchSnapServeAgents() });
+      } catch (error) {
+        return send(res, 502, { error: error.message, agents: [] });
+      }
     }
 
     const statusMatch = pathname.match(/^\/api\/admin\/orders\/(\d+)$/);
@@ -340,7 +435,10 @@ const server = http.createServer(async (req, res) => {
       const result = await pool.query("SELECT * FROM orders WHERE id=$1", [callMatch[1]]);
       if (!result.rowCount) return send(res, 404, { error: "Order not found" });
       try {
-        const reference = await safelyTriggerSnapServe(result.rows[0]);
+        const body = await parseJson(req);
+        const requestedAgentId = body.agentId == null || body.agentId === "" ? null : Number(body.agentId);
+        if (requestedAgentId != null && (!Number.isSafeInteger(requestedAgentId) || requestedAgentId < 1)) return send(res, 400, { error: "Select a valid SnapServe agent" });
+        const reference = await safelyTriggerSnapServe(result.rows[0], { agentId: requestedAgentId, agentName: body.agentName });
         return send(res, 200, { accepted: true, reference });
       } catch (error) {
         return send(res, 502, { error: error.message });

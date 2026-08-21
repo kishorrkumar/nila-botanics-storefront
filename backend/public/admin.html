@@ -5,19 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nila Botanics — Order Admin</title>
   <link rel="stylesheet" href="/admin/admin.css">
-  <style>.integration{margin-bottom:16px;padding:14px 18px;border-radius:8px;background:#fff;border:1px solid #ded8cb;font-size:13px}.integration.ready{border-color:#8eb49f;background:#edf7f1}.integration.warning{border-color:#d6ae6c;background:#fff8e8}.call-details{grid-column:1/-1;border-top:1px solid #ded8cb;padding-top:12px}.call-details summary{cursor:pointer;font-weight:700}.call-details pre{white-space:pre-wrap;background:#f6f1e7;padding:12px;max-height:260px;overflow:auto}.call-details a{text-decoration:underline}.actions button:disabled{opacity:.45;cursor:not-allowed}</style>
 </head>
 <body>
-  <header><div><p>NILA BOTANICS</p><h1>Order administration</h1></div><button id="refresh">Refresh orders</button></header>
+  <header>
+    <div><p>NILA BOTANICS</p><h1>Order administration</h1></div>
+    <button id="refresh">Refresh data</button>
+  </header>
   <main>
     <section class="integration" id="integration">Checking SnapServe integration…</section>
-    <section class="stats" id="stats"></section>
-    <section class="toolbar">
-      <input id="search" placeholder="Search order, customer or phone">
-      <select id="filter"><option value="all">All statuses</option><option>placed</option><option>confirmed</option><option>packing</option><option>shipped</option><option>delivered</option><option>cancelled</option></select>
-      <span id="message"></span>
+    <p id="message" class="global-message" aria-live="polite"></p>
+    <nav class="tabs" aria-label="Admin sections">
+      <button class="tab active" data-panel="analytics-panel">Analytics</button>
+      <button class="tab" data-panel="orders-panel">Orders</button>
+    </nav>
+
+    <section id="analytics-panel" class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">PERFORMANCE</p><h2>Order analytics</h2></div>
+        <label>Period
+          <select id="analytics-period"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select>
+        </label>
+      </div>
+      <section class="metrics" id="metrics"><p class="empty">Loading analytics…</p></section>
+      <div class="analytics-grid">
+        <section class="analytics-card trend-card"><div class="card-title"><h3>Sales trend</h3><span>Revenue by day</span></div><div id="sales-chart" class="sales-chart"></div></section>
+        <section class="analytics-card"><div class="card-title"><h3>Order status</h3><span>Current distribution</span></div><div id="status-chart"></div></section>
+        <section class="analytics-card"><div class="card-title"><h3>Top products</h3><span>By units ordered</span></div><div id="product-table"></div></section>
+        <section class="analytics-card"><div class="card-title"><h3>Voice calls</h3><span>SnapServe performance</span></div><div id="call-analytics"></div></section>
+      </div>
     </section>
-    <section id="orders" class="orders"><p class="empty">Loading orders…</p></section>
+
+    <section id="orders-panel" class="panel" hidden>
+      <section class="stats" id="stats"></section>
+      <section class="toolbar">
+        <input id="search" placeholder="Search order, customer or phone">
+        <select id="filter"><option value="all">All statuses</option><option>placed</option><option>confirmed</option><option>packing</option><option>shipped</option><option>delivered</option><option>cancelled</option></select>
+      </section>
+      <section id="orders" class="orders"><p class="empty">Loading orders…</p></section>
+    </section>
   </main>
   <script type="module" src="/admin/admin.js"></script>
 </body>
