@@ -3,47 +3,85 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Nila Botanics — Order Admin</title>
+  <meta name="theme-color" content="#f7f8f6">
+  <title>Nila Botanics — Operations</title>
   <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
-  <header>
-    <div><p>NILA BOTANICS</p><h1>Order administration</h1></div>
-    <button id="refresh">Refresh data</button>
-  </header>
-  <main>
-    <section class="integration" id="integration">Checking SnapServe integration…</section>
-    <p id="message" class="global-message" aria-live="polite"></p>
-    <nav class="tabs" aria-label="Admin sections">
-      <button class="tab active" data-panel="analytics-panel">Analytics</button>
-      <button class="tab" data-panel="orders-panel">Orders</button>
-    </nav>
-
-    <section id="analytics-panel" class="panel">
-      <div class="section-heading">
-        <div><p class="eyebrow">PERFORMANCE</p><h2>Order analytics</h2></div>
-        <label>Period
-          <select id="analytics-period"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select>
-        </label>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/admin" aria-label="Nila Botanics admin home">
+        <span class="brand-mark">N</span>
+        <span><strong>Nila Botanics</strong><small>Operations</small></span>
+      </a>
+      <p class="nav-label">Workspace</p>
+      <nav class="side-nav" aria-label="Admin sections">
+        <button class="tab active" data-panel="analytics-panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg>
+          Analytics
+        </button>
+        <button class="tab" data-panel="orders-panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8h12l1 12H5L6 8Zm3 0V6a3 3 0 0 1 6 0v2"/></svg>
+          Orders
+          <span class="nav-count" id="order-count">0</span>
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="live-dot"></span>
+        <div><strong>Admin workspace</strong><small>Render + Neon</small></div>
       </div>
-      <section class="metrics" id="metrics"><p class="empty">Loading analytics…</p></section>
-      <div class="analytics-grid">
-        <section class="analytics-card trend-card"><div class="card-title"><h3>Sales trend</h3><span>Revenue by day</span></div><div id="sales-chart" class="sales-chart"></div></section>
-        <section class="analytics-card"><div class="card-title"><h3>Order status</h3><span>Current distribution</span></div><div id="status-chart"></div></section>
-        <section class="analytics-card"><div class="card-title"><h3>Top products</h3><span>By units ordered</span></div><div id="product-table"></div></section>
-        <section class="analytics-card"><div class="card-title"><h3>Voice calls</h3><span>SnapServe performance</span></div><div id="call-analytics"></div></section>
-      </div>
-    </section>
+    </aside>
 
-    <section id="orders-panel" class="panel" hidden>
-      <section class="stats" id="stats"></section>
-      <section class="toolbar">
-        <input id="search" placeholder="Search order, customer or phone">
-        <select id="filter"><option value="all">All statuses</option><option>placed</option><option>confirmed</option><option>packing</option><option>shipped</option><option>delivered</option><option>cancelled</option></select>
-      </section>
-      <section id="orders" class="orders"><p class="empty">Loading orders…</p></section>
-    </section>
-  </main>
+    <div class="workspace">
+      <header class="topbar">
+        <div><p class="eyebrow">STORE OPERATIONS</p><h1 id="page-title">Overview</h1></div>
+        <div class="top-actions">
+          <p id="message" class="global-message" aria-live="polite"></p>
+          <button id="refresh" class="icon-button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18 6l2 5M4 13l2 5a7 7 0 0 0 11.9-3"/></svg>
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="integration" id="integration"><span class="integration-dot"></span><span>Checking SnapServe integration…</span></section>
+
+        <section id="analytics-panel" class="panel">
+          <div class="section-heading">
+            <div><h2>Business performance</h2><p>Sales, fulfilment and call activity at a glance.</p></div>
+            <label class="period-control"><span>Period</span>
+              <select id="analytics-period"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select>
+            </label>
+          </div>
+
+          <section class="metrics" id="metrics"><p class="empty">Loading analytics…</p></section>
+          <div class="analytics-grid">
+            <section class="analytics-card trend-card">
+              <div class="card-title"><div><h3>Revenue</h3><span>Non-cancelled order value</span></div><span class="legend"><i></i>Sales</span></div>
+              <div id="sales-chart" class="sales-chart"></div>
+            </section>
+            <section class="analytics-card status-card"><div class="card-title"><div><h3>Order status</h3><span>Fulfilment distribution</span></div></div><div id="status-chart"></div></section>
+            <section class="analytics-card"><div class="card-title"><div><h3>Top products</h3><span>Ranked by units ordered</span></div></div><div id="product-table"></div></section>
+            <section class="analytics-card"><div class="card-title"><div><h3>Voice operations</h3><span>SnapServe call performance</span></div></div><div id="call-analytics"></div></section>
+          </div>
+        </section>
+
+        <section id="orders-panel" class="panel" hidden>
+          <div class="section-heading"><div><h2>Orders</h2><p>Manage fulfilment and customer calls.</p></div></div>
+          <section class="stats" id="stats"></section>
+          <section class="toolbar">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+              <input id="search" placeholder="Search orders, customers or phone">
+            </label>
+            <select id="filter"><option value="all">All statuses</option><option>placed</option><option>confirmed</option><option>packing</option><option>shipped</option><option>delivered</option><option>cancelled</option></select>
+          </section>
+          <section id="orders" class="orders"><p class="empty">Loading orders…</p></section>
+        </section>
+      </main>
+    </div>
+  </div>
   <script type="module" src="/admin/admin.js"></script>
 </body>
 </html>
