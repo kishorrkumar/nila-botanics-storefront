@@ -181,7 +181,7 @@ async function triggerSnapServe(order) {
   const agentId = Number(process.env.SNAPSERVE_AGENT_ID);
   const apiKey = process.env.SNAPSERVE_API_KEY;
   if (!agentId || !apiKey) throw new Error("Configure SNAPSERVE_AGENT_ID and SNAPSERVE_API_KEY, or provide SNAPSERVE_CAMPAIGN_WEBHOOK_URL");
-  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://app.snapserve.ai/api").replace(/\/$/, "");
+  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/calls/outbound`, {
     method: "POST",
     headers: {
@@ -243,7 +243,7 @@ async function refreshSnapServeCall(order) {
   if (!order.call_id) throw new Error("This order does not have a direct SnapServe call ID yet");
   const apiKey = process.env.SNAPSERVE_API_KEY;
   if (!apiKey) throw new Error("SNAPSERVE_API_KEY is not configured");
-  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://app.snapserve.ai/api").replace(/\/$/, "");
+  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/calls/${order.call_id}`, { headers: { Authorization: `Bearer ${apiKey}` } });
   const text = await response.text();
   if (!response.ok) throw new Error(`Unable to load SnapServe call (${response.status}): ${text.slice(0, 240)}`);

@@ -92,7 +92,7 @@ Keep every SnapServe secret only in Render. Two calling modes are supported.
 Create an active SnapServe campaign with **Website form** as the lead source. Map `phone`, `name`, `order_id`, `order_total`, `delivery_address`, and `items` to your agent variables, then set the returned form webhook URL:
 
 ```env
-SNAPSERVE_CAMPAIGN_WEBHOOK_URL=https://app.snapserve.ai/api/webhooks/lead/YOUR_TOKEN
+SNAPSERVE_CAMPAIGN_WEBHOOK_URL=https://api.snapserve.ai/api/webhooks/lead/YOUR_TOKEN
 SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN=
 AUTO_CALL_ON_ORDER=false
 ```
@@ -103,7 +103,7 @@ This mode lets the delivery agent use the submitted order fields. Activate the c
 
 ```env
 SNAPSERVE_API_KEY=YOUR_REAL_SERVER_SIDE_KEY
-SNAPSERVE_BASE_URL=https://app.snapserve.ai/api
+SNAPSERVE_BASE_URL=https://api.snapserve.ai/api
 SNAPSERVE_AGENT_ID=YOUR_DELIVERY_AGENT_ID
 AUTO_CALL_ON_ORDER=false
 ```

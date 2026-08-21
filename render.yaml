@@ -22,7 +22,7 @@ services:
       - key: SNAPSERVE_API_KEY
         sync: false
       - key: SNAPSERVE_BASE_URL
-        value: https://app.snapserve.ai/api
+        value: https://api.snapserve.ai/api
       - key: SNAPSERVE_AGENT_ID
         sync: false
       - key: SNAPSERVE_CAMPAIGN_WEBHOOK_URL
