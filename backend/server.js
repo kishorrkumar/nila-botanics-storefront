@@ -98,6 +98,21 @@ function normalisePhone(value) {
   return cleanText(value, 24).replace(/[ ()-]/g, "");
 }
 
+function toE164Phone(value) {
+  const phone = normalisePhone(value);
+  if (/^\+[1-9]\d{7,14}$/.test(phone)) return phone;
+  if (/^[6-9]\d{9}$/.test(phone)) return `+91${phone}`;
+  if (/^91[6-9]\d{9}$/.test(phone)) return `+${phone}`;
+  throw new Error("Customer phone must be a valid E.164 number, for example +919876543210");
+}
+
+function publicBaseUrl(req) {
+  const configured = cleanText(process.env.SNAPSERVE_WEBHOOK_BASE_URL || process.env.RENDER_EXTERNAL_URL, 2000);
+  if (configured) return configured.replace(/\/$/, "");
+  const protocol = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
+  return `${protocol}://${req.headers.host}`;
+}
+
 function makeOrderNumber() {
   return `NILA-${Date.now().toString(36).toUpperCase()}-${crypto.randomInt(100, 1000)}`;
 }
@@ -151,9 +166,11 @@ async function createOrder(body) {
 }
 
 function snapServeConfig() {
+  const configuredBaseUrl = (process.env.SNAPSERVE_BASE_URL || "https://app.snapserve.ai/api").replace(/\/$/, "");
   return {
     apiKey: process.env.SNAPSERVE_API_KEY,
-    baseUrl: (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "")
+    baseUrl: configuredBaseUrl,
+    outboundBaseUrl: configuredBaseUrl === "https://api.snapserve.ai/api" ? "https://app.snapserve.ai/api" : configuredBaseUrl
   };
 }
 
@@ -170,10 +187,19 @@ function normaliseSnapServeAgents(payload) {
 async function fetchSnapServeAgents() {
   const { apiKey, baseUrl } = snapServeConfig();
   if (!apiKey) throw new Error("SNAPSERVE_API_KEY is not configured");
-  const response = await fetch(`${baseUrl}/agents`, { headers: { Authorization: `Bearer ${apiKey}` } });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Unable to load SnapServe agents (${response.status}): ${text.slice(0, 240)}`);
-  return normaliseSnapServeAgents(JSON.parse(text));
+  const hosts = [...new Set([baseUrl, "https://app.snapserve.ai/api", "https://api.snapserve.ai/api"])];
+  let lastError = "Agent endpoint unavailable";
+  for (const host of hosts) {
+    try {
+      const response = await fetch(`${host}/agents`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      const text = await response.text();
+      if (response.ok) return normaliseSnapServeAgents(JSON.parse(text));
+      lastError = `${response.status}: ${text.slice(0, 160)}`;
+    } catch (error) {
+      lastError = error.message;
+    }
+  }
+  throw new Error(`Unable to load SnapServe agents (${lastError})`);
 }
 
 async function triggerSnapServe(order, options = {}) {
@@ -206,20 +232,25 @@ async function triggerSnapServe(order, options = {}) {
 
   const agentId = Number(options.agentId || process.env.SNAPSERVE_AGENT_ID);
   let agentName = cleanText(options.agentName, 160) || null;
-  const { apiKey, baseUrl } = snapServeConfig();
+  const { apiKey, outboundBaseUrl } = snapServeConfig();
   if (!agentId || !apiKey) throw new Error("Configure SNAPSERVE_AGENT_ID and SNAPSERVE_API_KEY, or provide SNAPSERVE_CAMPAIGN_WEBHOOK_URL");
   if (options.agentId) {
     const selectedAgent = (await fetchSnapServeAgents()).find(agent => agent.id === agentId);
     if (!selectedAgent) throw new Error("The selected SnapServe agent is no longer available");
     agentName = selectedAgent.name;
   }
-  const response = await fetch(`${baseUrl}/calls/outbound`, {
+  const webhookBaseUrl = cleanText(options.webhookBaseUrl || process.env.SNAPSERVE_WEBHOOK_BASE_URL || process.env.RENDER_EXTERNAL_URL, 2000).replace(/\/$/, "");
+  const response = await fetch(`${outboundBaseUrl}/calls/outbound`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({ agentId, toNumber: order.phone })
+    body: JSON.stringify({
+      agentId,
+      toNumber: toE164Phone(order.phone),
+      ...(webhookBaseUrl ? { webhookBaseUrl } : {})
+    })
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`SnapServe rejected the call (${response.status}): ${text.slice(0, 240)}`);
@@ -274,8 +305,8 @@ async function refreshSnapServeCall(order) {
   if (!order.call_id) throw new Error("This order does not have a direct SnapServe call ID yet");
   const apiKey = process.env.SNAPSERVE_API_KEY;
   if (!apiKey) throw new Error("SNAPSERVE_API_KEY is not configured");
-  const baseUrl = (process.env.SNAPSERVE_BASE_URL || "https://api.snapserve.ai/api").replace(/\/$/, "");
-  const response = await fetch(`${baseUrl}/calls/${order.call_id}`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const { outboundBaseUrl } = snapServeConfig();
+  const response = await fetch(`${outboundBaseUrl}/calls/${order.call_id}`, { headers: { Authorization: `Bearer ${apiKey}` } });
   const text = await response.text();
   if (!response.ok) throw new Error(`Unable to load SnapServe call (${response.status}): ${text.slice(0, 240)}`);
   return updateOrderFromCall(JSON.parse(text));
@@ -374,7 +405,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && pathname === "/api/orders") {
       const created = await createOrder(await parseJson(req));
       if (created.error) return send(res, 400, created, cors);
-      if (process.env.AUTO_CALL_ON_ORDER === "true" && created.row.voice_call_consent) safelyTriggerSnapServe(created.row).catch(error => console.error("Automatic call failed:", error.message));
+      if (process.env.AUTO_CALL_ON_ORDER === "true" && created.row.voice_call_consent) safelyTriggerSnapServe(created.row, { webhookBaseUrl: publicBaseUrl(req) }).catch(error => console.error("Automatic call failed:", error.message));
       return send(res, 201, {
         orderId: created.row.order_number,
         status: created.row.status,
@@ -438,7 +469,13 @@ const server = http.createServer(async (req, res) => {
         const body = await parseJson(req);
         const requestedAgentId = body.agentId == null || body.agentId === "" ? null : Number(body.agentId);
         if (requestedAgentId != null && (!Number.isSafeInteger(requestedAgentId) || requestedAgentId < 1)) return send(res, 400, { error: "Select a valid SnapServe agent" });
-        const reference = await safelyTriggerSnapServe(result.rows[0], { agentId: requestedAgentId, agentName: body.agentName });
+        let order = result.rows[0];
+        if (!order.voice_call_consent) {
+          if (body.confirmConsent !== true) return send(res, 409, { error: "Confirm that the customer consented before starting the call" });
+          const consented = await pool.query("UPDATE orders SET voice_call_consent=true WHERE id=$1 RETURNING *", [order.id]);
+          order = consented.rows[0];
+        }
+        const reference = await safelyTriggerSnapServe(order, { agentId: requestedAgentId, agentName: body.agentName, webhookBaseUrl: publicBaseUrl(req) });
         return send(res, 200, { accepted: true, reference });
       } catch (error) {
         return send(res, 502, { error: error.message });

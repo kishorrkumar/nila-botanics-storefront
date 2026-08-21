@@ -92,7 +92,7 @@ Keep every SnapServe secret only in Render. Two calling modes are supported.
 Create an active SnapServe campaign with **Website form** as the lead source. Map `phone`, `name`, `order_id`, `order_total`, `delivery_address`, and `items` to your agent variables, then set the returned form webhook URL:
 
 ```env
-SNAPSERVE_CAMPAIGN_WEBHOOK_URL=https://api.snapserve.ai/api/webhooks/lead/YOUR_TOKEN
+SNAPSERVE_CAMPAIGN_WEBHOOK_URL=https://app.snapserve.ai/api/webhooks/lead/YOUR_TOKEN
 SNAPSERVE_CAMPAIGN_WEBHOOK_TOKEN=
 AUTO_CALL_ON_ORDER=false
 ```
@@ -103,12 +103,13 @@ This mode lets the delivery agent use the submitted order fields. Activate the c
 
 ```env
 SNAPSERVE_API_KEY=YOUR_REAL_SERVER_SIDE_KEY
-SNAPSERVE_BASE_URL=https://api.snapserve.ai/api
+SNAPSERVE_BASE_URL=https://app.snapserve.ai/api
 SNAPSERVE_AGENT_ID=YOUR_DELIVERY_AGENT_ID
+SNAPSERVE_WEBHOOK_BASE_URL=https://YOUR-RENDER-SERVICE.onrender.com
 AUTO_CALL_ON_ORDER=false
 ```
 
-Direct calls use SnapServe's documented `POST /calls/outbound` endpoint. It accepts `agentId` and `toNumber`; it does not accept per-call variables, so campaign intake is better for personalized order calls.
+Direct calls use SnapServe's documented `POST /calls/outbound` endpoint with `agentId`, an E.164 `toNumber`, and the Render `webhookBaseUrl`. It does not accept per-call variables, so campaign intake is better for personalized order calls.
 
 When the API key is configured, the admin loads the available choices from `GET /agents`. Choose an agent in an order card before pressing **Call customer**. Selecting a named agent uses direct API mode for that call; **Default / campaign agent** keeps the configured default behavior.
 
@@ -133,7 +134,7 @@ Important:
 - Never expose `SNAPSERVE_API_KEY` in frontend code or a `NEXT_PUBLIC_*` variable.
 - Keep `AUTO_CALL_ON_ORDER=false` while testing and use **Call customer** manually.
 - After a successful test, set `AUTO_CALL_ON_ORDER=true` for automatic calls.
-- Calls are available only when the customer checks the automated-call consent box.
+- Calls are available when the customer checks the automated-call consent box. For an older order, an admin must explicitly confirm the customer's permission before the call button is enabled.
 
 ## API endpoints
 
