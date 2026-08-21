@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS orders (
   call_status VARCHAR(32) NOT NULL DEFAULT 'not_called',
   call_id BIGINT,
   call_reference TEXT,
+  call_agent_id BIGINT,
+  call_agent_name VARCHAR(160),
   call_error TEXT,
   call_duration_seconds INTEGER,
   call_cost_paise INTEGER,
@@ -30,6 +32,8 @@ CREATE TABLE IF NOT EXISTS orders (
 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS voice_call_consent BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_id BIGINT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_agent_id BIGINT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_agent_name VARCHAR(160);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_duration_seconds INTEGER;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_cost_paise INTEGER;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS call_summary TEXT;

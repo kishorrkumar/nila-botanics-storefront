@@ -77,7 +77,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=USE_A_STRONG_PASSWORD
 ```
 
-The admin dashboard is `https://YOUR-RENDER-SERVICE.onrender.com/admin`. `FRONTEND_ORIGIN` accepts comma-separated URLs if you also use a custom domain.
+The admin dashboard is `https://YOUR-RENDER-SERVICE.onrender.com/admin`. It includes order analytics, fulfilment controls, and a SnapServe agent selector for consented calls. `FRONTEND_ORIGIN` accepts comma-separated URLs if you also use a custom domain.
 
 ## PostgreSQL
 
@@ -110,6 +110,8 @@ AUTO_CALL_ON_ORDER=false
 
 Direct calls use SnapServe's documented `POST /calls/outbound` endpoint. It accepts `agentId` and `toNumber`; it does not accept per-call variables, so campaign intake is better for personalized order calls.
 
+When the API key is configured, the admin loads the available choices from `GET /agents`. Choose an agent in an order card before pressing **Call customer**. Selecting a named agent uses direct API mode for that call; **Default / campaign agent** keeps the configured default behavior.
+
 ### Call-result webhook
 
 Register this Render endpoint for `call.completed` and `call.failed`:
@@ -140,10 +142,12 @@ Important:
 | `POST` | `/api/orders` | Public storefront | Create demo-authorized order |
 | `POST` | `/api/orders/status` | Order ID + phone | Order lookup |
 | `GET` | `/api/admin/orders` | Admin | List orders |
+| `GET` | `/api/admin/analytics?days=30` | Admin | Revenue, status, product and call analytics |
 | `PATCH` | `/api/admin/orders/:id` | Admin | Update fulfilment status |
 | `POST` | `/api/admin/orders/:id/call` | Admin | Initiate delivery call |
 | `POST` | `/api/admin/orders/:id/call/refresh` | Admin | Refresh direct-call result |
 | `GET` | `/api/admin/snapserve` | Admin | Integration status |
+| `GET` | `/api/admin/snapserve/agents` | Admin | List available call agents |
 | `POST` | `/api/webhooks/snapserve` | Signed SnapServe | Store call result |
 | `GET` | `/api/health` | Public | Render health check |
 
