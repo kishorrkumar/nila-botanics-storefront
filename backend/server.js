@@ -8,8 +8,11 @@ import pg from "pg";
 const { Pool } = pg;
 const root = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4000);
-const allowedOrigins = (process.env.FRONTEND_ORIGIN || "http://localhost:3000")
-  .split(",").map(value => value.trim()).filter(Boolean);
+const allowedOrigins = new Set([
+  "http://localhost:3000",
+  "https://nila-botanics-storefront.vercel.app",
+  ...(process.env.FRONTEND_ORIGIN || "").split(",").map(value => value.trim()).filter(Boolean)
+]);
 const statuses = new Set(["placed", "confirmed", "packing", "shipped", "delivered", "cancelled"]);
 
 if (!process.env.DATABASE_URL) {
@@ -37,7 +40,7 @@ function send(res, status, body, headers = {}) {
 
 function corsHeaders(req) {
   const origin = req.headers.origin;
-  if (!origin || !allowedOrigins.includes(origin)) return {};
+  if (!origin || !allowedOrigins.has(origin)) return {};
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
