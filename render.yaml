@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: nila-botanics-admin
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SNAPSERVE_API_KEY
+        sync: false
+      - key: SNAPSERVE_BASE_URL
+        value: https://app.snapserve.ai/api
+      - key: SNAPSERVE_MCP_SCRIPT
+        sync: false
+      - key: SNAPSERVE_MCP_CALL_TOOL
+        sync: false
+      - key: SNAPSERVE_MCP_CALL_ARGS_JSON
+        sync: false
+      - key: AUTO_CALL_ON_ORDER
+        value: "false"
